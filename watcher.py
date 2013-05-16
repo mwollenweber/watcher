@@ -22,6 +22,7 @@ try:
     import magic
     import re
     import signal
+    import socket
     import subprocess
     import time
     import traceback
@@ -59,7 +60,7 @@ class alerter:
 
 
 class tcpdumpd:
-    def __init__(self, logger = None):
+    def __init__(self, logger = None, source = None):
         if logger == None:
             logger = logging.getLogger('')
             logger.setLevel(logging.DEBUG)
@@ -74,16 +75,44 @@ class tcpdumpd:
         self.status = 0
         self.ROTATE_TIME = 0
         self.ROTATE_PERIOD = 90
+        self.exe = "tcpdump"
+        self.arg_str = '-i en0 -qStnnvs 1500 -w %s ip'
         self.PID_FILE = '/tmp/tcpdump.pid'
-        #self.TCPDUMP_ARGS = ' -i en0 -qStnnvs 1500 -w out.dump ip '
-        #self.TCPDUMP_ARGS = '-w out.dump ip'
+        self.TCPDUMP_ARGS_STR = ' -i en0 -qStnnvs 1500 -w %s ip '
         self.TCPDUMP_ARGS = ['-i en0', '-qStnnvs 1500', '-w out.dump', 'ip']
         self.DATADIR = '/data/tcpdump/vip'
         self.TCPDUMP = '/opt/local/sbin/tcpdump'
         self.filterexp = None
+        if source == None:
+            self.source = socket.gethostname()
         
         self.cmd = ['tcpdump', '-i', 'en0', '-qStnnv', '-w', 'out.dump', 'ip']
         self.tcpd_proc = None
+        self.build_cmd()
+
+    #FIXME. Basically need to decorate the arg_str to replace any "%s". Need to generalize
+    def build_cmd(self, exe = None, arg_str = None):
+        if exe == None:
+            if self.exe != None:
+                exe = self.exe
+            else:
+                self.logger.error("No executable defined. Exiting")
+                sys.exit(-1)
+        
+        if arg_str == None:
+            if self.arg_str != None:
+                arg_str = self.arg_str
+            else:
+                self.logger.debug("no args given")
+                arg_str = ""
+                
+        #fills in variables for the arg str and builds the command
+        filename = self.source + "-" + time.strftime('%Y%m%d%H%M%S') + ".pcap"
+        arg_str = arg_str % (filename)
+        cmd = exe + "  " + arg_str
+        self.cmd = cmd.split()
+        return self.cmd
+    
     
     def filter_files(self, filelist):
         exp = self.filterexp
@@ -142,7 +171,7 @@ class tcpdumpd:
             else: raise
             
     def spawn_tcpdump(self):
-        
+        self.build_cmd()
         #rotate the previous output file
         
         self.ROTATE_TIME = time.time() + self.ROTATE_PERIOD
@@ -167,7 +196,9 @@ class tcpdumpd:
         self.status = -100
         self.logger.debug("done killing tcpdump")
         
-    
+    def clean_outfiles():
+        print "clean_outfiles: FIXME"
+        
     def check_tcpdump(self):
         try:
             #check if process is running
@@ -274,7 +305,8 @@ def main():
             #raise
         
         except:
-            tcpd.logger.error("Exiting")
+            tcpd.logger.error("Unknown ERROR in main. Exiting")
+            traceback.print_exc(file=sys.stderr)
             sys.exit(-1)
                 
 
