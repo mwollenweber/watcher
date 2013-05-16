@@ -19,6 +19,8 @@ try:
     import argparse
     import ConfigParser
     import logging
+    import magic
+    import re
     import signal
     import subprocess
     import time
@@ -76,17 +78,33 @@ class tcpdumpd:
         #self.TCPDUMP_ARGS = ' -i en0 -qStnnvs 1500 -w out.dump ip '
         #self.TCPDUMP_ARGS = '-w out.dump ip'
         self.TCPDUMP_ARGS = ['-i en0', '-qStnnvs 1500', '-w out.dump', 'ip']
-        self.TCPDUMP_DATADIR = '/data/tcpdump/vip'
+        self.DATADIR = '/data/tcpdump/vip'
         self.TCPDUMP = '/opt/local/sbin/tcpdump'
+        self.filterexp = None
         
         self.cmd = ['tcpdump', '-i', 'en0', '-qStnnv', '-w', 'out.dump', 'ip']
         self.tcpd_proc = None
+    
+    def filter_files(self, filelist):
+        exp = self.filterexp
+        if exp == None or exp == '':
+            return filelist
+        
+        filtered_list = []
+        for x in filelist:
+            if re.search(exp, x):
+                filtered_list.append(x)
+                
+        return filtered_list
     
     def get_pid(self):
         return int(self.pid)
     
     def get_status(self):
         return int(self.status)
+    
+    def get_datadir(self):
+        return str(self.DATADIR)
     
     def rotate_pcaps(self):
         self.logger.debug("Rotating pcap files")
@@ -175,7 +193,25 @@ class tcpdumpd:
             self.logger.debug("unknown random error in check_tcpdump")
             self.status = -2
             return False
+        
+    def get_filenames(self, path=None, regex = None):
+        if path == None:
+            path = self.get_datadir()
+        
+        filelist = []
+        if path == None:
+            return filelist
+        
+        try:
+            for root, dirs, files in os.walk(path):
+                for name in files:       
+                    filename = os.path.join(root, name)
+                    filelist.append(filename)
+        except:
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(-1)
             
+        return filelist    
 
 def main():
     parser = argparse.ArgumentParser(prog='template', usage='%(prog)s [options]')
