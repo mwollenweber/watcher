@@ -25,7 +25,9 @@ try:
     import socket
     import subprocess
     import time
+    import threading
     import traceback
+    import zipfile
     
 except ImportError, e:
         from notify import *
@@ -90,6 +92,13 @@ class tcpdumpd:
         self.tcpd_proc = None
         self.build_cmd()
 
+    def build_outfilename(self, prefix = '', base = '', suffix = '', ext = ''):
+        #filename = self.source + "-" + time.strftime('%Y%m%d%H%M%S') + ".pcap"
+        ext = ".pcap"
+        filename = prefix + self.source + "-" + base + "-" + time.strftime('%Y%m%d%H%M%S') +suffix + ext
+        return filename
+    
+        
     #FIXME. Basically need to decorate the arg_str to replace any "%s". Need to generalize
     def build_cmd(self, exe = None, arg_str = None):
         if exe == None:
@@ -107,7 +116,7 @@ class tcpdumpd:
                 arg_str = ""
                 
         #fills in variables for the arg str and builds the command
-        filename = self.source + "-" + time.strftime('%Y%m%d%H%M%S') + ".pcap"
+        filename = self.build_outfilename()
         arg_str = arg_str % (filename)
         cmd = exe + "  " + arg_str
         self.cmd = cmd.split()
@@ -224,6 +233,10 @@ class tcpdumpd:
             self.logger.debug("unknown random error in check_tcpdump")
             self.status = -2
             return False
+
+    def zipfiles(self, filename):
+      
+        
         
     def get_filenames(self, path=None, regex = None):
         if path == None:
@@ -242,7 +255,12 @@ class tcpdumpd:
             traceback.print_exc(file=sys.stderr)
             sys.exit(-1)
             
-        return filelist    
+        return filelist
+    
+    def kill(self):
+        self.logger.debug("Killing processes")
+        self.kill_tcpdump()
+        
 
 def main():
     parser = argparse.ArgumentParser(prog='template', usage='%(prog)s [options]')
@@ -294,19 +312,20 @@ def main():
                 #fixme this chain of events is basically just a restart
                 tcpd.kill_tcpdump()
                 tcpd.spawn_tcpdump()
-                tcpd.clean_outfiles()
+                #tcpd.clean_outfiles()
                 
             tcpd.logger.debug("tcpdump looks good...sleeping")
             time.sleep(5)           
         except (KeyboardInterrupt, SystemExit):
             tcpd.logger.error("Caught interupt, exiting")
-            tcpd.kill_tcpdump()
+            tcpd.kill()
             sys.exit(-1)
             #raise
         
         except:
             tcpd.logger.error("Unknown ERROR in main. Exiting")
             traceback.print_exc(file=sys.stderr)
+            tcpd.kill()
             sys.exit(-1)
                 
 
