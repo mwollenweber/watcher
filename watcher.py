@@ -18,6 +18,7 @@ try:
     import sys
     import argparse
     import ConfigParser
+    import gzip
     import logging
     import magic
     import re
@@ -27,7 +28,7 @@ try:
     import time
     import threading
     import traceback
-    import zipfile
+    #import zipfile
     
 except ImportError, e:
         from notify import *
@@ -81,21 +82,25 @@ class tcpdumpd:
         self.arg_str = '-i en0 -qStnnvs 1500 -w %s ip'
         self.PID_FILE = '/tmp/tcpdump.pid'
         self.TCPDUMP_ARGS_STR = ' -i en0 -qStnnvs 1500 -w %s ip '
-        self.TCPDUMP_ARGS = ['-i en0', '-qStnnvs 1500', '-w out.dump', 'ip']
-        self.DATADIR = '/data/tcpdump/vip'
+        self.TCPDUMP_ARGS = None
+        self.DATADIR = '/data/tcpdump/vip/'
         self.TCPDUMP = '/opt/local/sbin/tcpdump'
         self.filterexp = None
         if source == None:
             self.source = socket.gethostname()
         
-        self.cmd = ['tcpdump', '-i', 'en0', '-qStnnv', '-w', 'out.dump', 'ip']
+        self.cmd = None
         self.tcpd_proc = None
         self.build_cmd()
 
-    def build_outfilename(self, prefix = '', base = '', suffix = '', ext = ''):
+    def build_outfilename(self, prefix = '', base = '', suffix = '', ext = '', path = ''):
         #filename = self.source + "-" + time.strftime('%Y%m%d%H%M%S') + ".pcap"
+        
+        if path == '':
+            path = self.DATADIR
+            
         ext = ".pcap"
-        filename = prefix + self.source + "-" + base + "-" + time.strftime('%Y%m%d%H%M%S') +suffix + ext
+        filename = path + prefix + self.source + "-" + base + "-" + time.strftime('%Y%m%d%H%M%S') +suffix + ext
         return filename
     
         
@@ -123,14 +128,19 @@ class tcpdumpd:
         return self.cmd
     
     
-    def filter_files(self, filelist):
-        exp = self.filterexp
+    def filter_files_by_name(self, filelist, exp):
+        self.logger.debug("Filtering files by name using exp=%s", exp)
+        
         if exp == None or exp == '':
+            self.logger.debug("No name filter given")
+            exp = self.filterexp
             return filelist
         
         filtered_list = []
         for x in filelist:
-            if re.search(exp, x):
+            #if re.match(exp, x) != None:
+            if re.search(exp, x) != None:
+                self.logger.debug("Matched file %s with regex=%s" % (x, exp))
                 filtered_list.append(x)
                 
         return filtered_list
@@ -229,13 +239,76 @@ class tcpdumpd:
             self.logger.error("tcpdump PID=%s is not running" % self.get_pid())
             return False
         
+        except KeyboardInterrupt:
+            self.logger.error("Keyboard Interrupt...Exiting!")
+            sys.exit(-1)
+    
         except:
             self.logger.debug("unknown random error in check_tcpdump")
             self.status = -2
             return False
 
-    def zipfiles(self, filename):
-      
+    def zipfiles(self, filepath = None, filter_regex = None, mdiff = None):
+        if filepath == None:
+            filepath == self.DATADIR
+            
+        files = self.get_filenames(path=filepath)
+        files = self.filter_files_by_name(files, filter_regex)
+        files = self.filter_files_by_mtime(files)
+        for f in files:
+            self.zipfile(f)
+        
+                
+    def zipfile(self, infile):
+        try:
+            f = open(infile)
+            #FIXME don't read big files
+            data = f.read()
+            f.close()
+            
+            outfile = infile + ".gz"
+            z = gzip.GzipFile(outfile, "wb", compresslevel = 9)
+            #z = gzip.ZipFile(outfile, "w")
+            z.write(data)
+            z.close()
+            
+        except KeyboardInterrupt:
+            self.logger.debug("Keyboard Interrupt...Exiting!")
+            sys.exit(-1)
+            
+        except:
+            traceback.print_exc(file=sys.stderr)
+            return -1
+        
+        return 0
+        
+    def zip_remove(self, infile):
+        if self.zipfile(infile) == 0:
+            os.remove(infile)
+            
+        
+    def filter_files_by_mtime(self, flist, mdiff = None):
+        olist = []   
+        now = time.time()
+        if mdiff == None:
+            #FIXME
+            #mdiff = 60*60
+            mdiff = 60
+        
+        for f in flist:
+            try:
+                (mode, ino, dev, nlink, uid, gid, size, atime, mtime, ctime) = os.stat(f)
+                if mtime < now - mdiff:
+                    olist.append(f)
+                    
+            except KeyboardInterrupt:
+                self.logger.debug("Keyboard Interrupt...Exiting!")
+                sys.exit(-1)      
+                
+            except:
+                continue
+        
+        return olist
         
         
     def get_filenames(self, path=None, regex = None):
@@ -251,6 +324,11 @@ class tcpdumpd:
                 for name in files:       
                     filename = os.path.join(root, name)
                     filelist.append(filename)
+                    
+        except KeyboardInterrupt:
+            self.logger.debug("Keyboard Interrupt...Exiting!")
+            sys.exit(-1)  
+            
         except:
             traceback.print_exc(file=sys.stderr)
             sys.exit(-1)
@@ -289,12 +367,15 @@ def main():
     except IOError:
         tcpd.logger.debug("No existing PID file")
         tcpd.spawn_tcpdump()
-        
-        
+         
     except OSError:
         tcpd.logger.debug("PID file exists, but the process does not")
         os.remove(PID_FILE)
         tcpd.spawn_tcpdump()
+        
+    except KeyboardInterrupt:
+                self.logger.debug("Keyboard Interrupt...Exiting!")
+                sys.exit(-1)    
     
     
     while 1 == 1:
@@ -313,6 +394,7 @@ def main():
                 tcpd.kill_tcpdump()
                 tcpd.spawn_tcpdump()
                 #tcpd.clean_outfiles()
+                tcpd.zipfiles(filter_regex="\.pcap$")
                 
             tcpd.logger.debug("tcpdump looks good...sleeping")
             time.sleep(5)           
