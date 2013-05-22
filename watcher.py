@@ -137,7 +137,7 @@ class tcpdumpd:
         
         if path == None:
             path = self.DATADIR
-        
+                
         flist = set(flist)    
         zfiles = self.get_filenames(path = path, regex = "\.pcap\.gz$")
         #remove the .gz
@@ -277,9 +277,14 @@ class tcpdumpd:
         files = self.get_filenames(path=filepath)
         #FIXME - need to filter already zipped
         self.logger.debug("DONT ZIP THE ALREADY ZIPPED!!")
-        #files = self.filter_already_zipped(files)
+        files = self.filter_already_zipped(files)
         files = self.filter_files_by_name(files, filter_regex)
         files = self.filter_files_by_mtime(files)
+        
+        self.logger.debug("Final list of files to zip:\n")
+        for f in files:
+            self.logger.debug(f)
+            
 
         for f in files:
             self.zip_queue.append(f)
