@@ -23,6 +23,7 @@ try:
     import magic
     import re
     import signal
+    import stat
     import socket
     import subprocess
     import time
@@ -74,6 +75,8 @@ class tcpdumpd:
             
 
         #FIXME CONFIG
+        self.zip_queue = []
+        self.CHUNKSIZE = 1024
         self.pid = -1
         self.status = 0
         self.ROTATE_TIME = 0
@@ -85,6 +88,7 @@ class tcpdumpd:
         self.TCPDUMP_ARGS = None
         self.DATADIR = '/data/tcpdump/vip/'
         self.TCPDUMP = '/opt/local/sbin/tcpdump'
+        self.MAXTHREADS = 4
         self.filterexp = None
         if source == None:
             self.source = socket.gethostname()
@@ -127,9 +131,27 @@ class tcpdumpd:
         self.cmd = cmd.split()
         return self.cmd
     
+    def filter_already_zipped(self, flist, path = None):
+        if flist == None:
+            return []
+        
+        if path == None:
+            path = self.DATADIR
+        
+        flist = set(flist)    
+        zfiles = self.get_filenames(path = path, regex = "\.pcap\.gz$")
+        #remove the .gz
+        for i in range(0, len(zfiles)):
+            zfiles[i] = zfiles[i][:-3]
+
+        zfiles = set(zfiles)
+        return list(flist.difference(zfiles))
+        
     
     def filter_files_by_name(self, filelist, exp):
         self.logger.debug("Filtering files by name using exp=%s", exp)
+        if filelist == None:
+            return []
         
         if exp == None or exp == '':
             self.logger.debug("No name filter given")
@@ -253,40 +275,65 @@ class tcpdumpd:
             filepath == self.DATADIR
             
         files = self.get_filenames(path=filepath)
+        #FIXME - need to filter already zipped
+        self.logger.debug("DONT ZIP THE ALREADY ZIPPED!!")
+        #files = self.filter_already_zipped(files)
         files = self.filter_files_by_name(files, filter_regex)
         files = self.filter_files_by_mtime(files)
+
         for f in files:
-            self.zipfile(f)
+            self.zip_queue.append(f)
+            
+        self.zip_queue = list(set(self.zip_queue))
         
-                
+        for i in range(0, min(len(self.zip_queue), self.MAXTHREADS)):
+            f = self.zip_queue.pop()
+            self.zipfile(f)
+            
+                    
     def zipfile(self, infile):
+        ret = 0
+        outfile = infile + ".gz"
         try:
-            f = open(infile)
-            #FIXME don't read big files
-            data = f.read()
-            f.close()
-            
-            outfile = infile + ".gz"
+            os.stat(outfile)
+            #error the file exists, move on
+            ret = -100
+            return ret
+        
+        except OSError:
+            pass
+        
+        
+        try:
             z = gzip.GzipFile(outfile, "wb", compresslevel = 9)
-            #z = gzip.ZipFile(outfile, "w")
-            z.write(data)
-            z.close()
             
+            f = open(infile)
+            data = f.read(self.CHUNKSIZE)
+            while data:
+                z.write(data)
+                data = f.read(self.CHUNKSIZE)
+            
+            f.close()
+            z.close()
+            os.chmod(outfile, stat.S_IREAD | stat.S_IRGRP)
+            
+        except IOError:
+            False
+         
         except KeyboardInterrupt:
             self.logger.debug("Keyboard Interrupt...Exiting!")
             sys.exit(-1)
             
         except:
             traceback.print_exc(file=sys.stderr)
-            return -1
-        
-        return 0
+            ret = -1
+                
+        return ret
         
     def zip_remove(self, infile):
         if self.zipfile(infile) == 0:
             os.remove(infile)
             
-        
     def filter_files_by_mtime(self, flist, mdiff = None):
         olist = []   
         now = time.time()
