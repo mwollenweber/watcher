@@ -89,6 +89,7 @@ class tcpdumpd:
         self.DATADIR = '/data/tcpdump/vip/'
         self.TCPDUMP = '/opt/local/sbin/tcpdump'
         self.MAXTHREADS = 4
+        self.threads = []
         self.filterexp = None
         if source == None:
             self.source = socket.gethostname()
@@ -160,9 +161,7 @@ class tcpdumpd:
         
         filtered_list = []
         for x in filelist:
-            #if re.match(exp, x) != None:
             if re.search(exp, x) != None:
-                self.logger.debug("Matched file %s with regex=%s" % (x, exp))
                 filtered_list.append(x)
                 
         return filtered_list
@@ -275,25 +274,34 @@ class tcpdumpd:
             filepath == self.DATADIR
             
         files = self.get_filenames(path=filepath)
-        #FIXME - need to filter already zipped
-        self.logger.debug("DONT ZIP THE ALREADY ZIPPED!!")
         files = self.filter_already_zipped(files)
         files = self.filter_files_by_name(files, filter_regex)
         files = self.filter_files_by_mtime(files)
         
-        self.logger.debug("Final list of files to zip:\n")
+        self.logger.debug("Final list of files to zip:")
         for f in files:
-            self.logger.debug(f)
+            self.logger.debug("\t" + f)
             
 
         for f in files:
             self.zip_queue.append(f)
             
+        #dedupe
         self.zip_queue = list(set(self.zip_queue))
+
+        #fixme move this to a thread management function
+        for t in self.threads:
+            if not t.isAlive():
+                t.handled = True
+        self.threads = [t for t in self.threads if not t.handled]
         
-        for i in range(0, min(len(self.zip_queue), self.MAXTHREADS)):
+        for i in range(0, min(len(self.zip_queue), (self.MAXTHREADS - len(self.threads)))):
             f = self.zip_queue.pop()
-            self.zipfile(f)
+            self.logger.debug("spawning thread to zip: %s" % f)
+            t = threading.Thread(target=self.zipfile, args =(f,))
+            t.start()
+            self.threads.append(t)
+            #self.zipfile(f)
             
                     
     def zipfile(self, infile):
